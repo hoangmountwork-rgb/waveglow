@@ -12,8 +12,6 @@ waveglow/
 ├── inference.py          # Script inference theo chuẩn NVIDIA
 └── README.md
 
-link checkpoints https://drive.google.com/drive/folders/1C2BXouxKQh5ishqY0ms1HEDnu-Ta2Rd2?dmr=1&ec=wgc-drive-hero-goto
-
 Yêu cầu
 - Python 3.8+
 - PyTorch 2.x (GPU + CUDA nếu có)
@@ -29,17 +27,10 @@ pip install torch numpy soundfile scipy
 
 Huấn luyện (Training)
 Chuẩn bị dữ liệu:
-
+- link checkpoints https://drive.google.com/drive/folders/1C2BXouxKQh5ishqY0ms1HEDnu-Ta2Rd2?dmr=1&ec=wgc-drive-hero-goto (giải nén vào thư mục checkpoints)
 - Sắp xếp các file .wav vào một thư mục.
 - Tạo train_files.txt chứa đường dẫn tất cả các file .wav.
 - Cấu hình các tham số trong config.json:
-{
-  "segment_length": 66000,
-  "sampling_rate": 22050,
-  "batch_size": 4,
-  "epochs": 30000
-}
-- segment_length: kích thước đoạn audio, càng lớn → context tốt hơn nhưng GPU sẽ nặng hơn.
 
 Bắt đầu huấn luyện:
 python train.py --config config.json
