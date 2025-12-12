@@ -1,188 +1,141 @@
-# *****************************************************************************
-#  Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
-#  Redistribution and use in source and binary forms, with or without
-#  modification, are permitted provided that the following conditions are met:
-#      * Redistributions of source code must retain the above copyright
-#        notice, this list of conditions and the following disclaimer.
-#      * Redistributions in binary form must reproduce the above copyright
-#        notice, this list of conditions and the following disclaimer in the
-#        documentation and/or other materials provided with the distribution.
-#      * Neither the name of the NVIDIA CORPORATION nor the
-#        names of its contributors may be used to endorse or promote products
-#        derived from this software without specific prior written permission.
-#
-#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-#  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-#  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-#  DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
-#  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-#  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-#  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-#  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-#  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-#  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# *****************************************************************************
-import argparse
-import json
 import os
+import json
 import torch
-
-#=====START: ADDED FOR DISTRIBUTED======
-from distributed import init_distributed, apply_gradient_allreduce, reduce_tensor
-from torch.utils.data.distributed import DistributedSampler
-#=====END:   ADDED FOR DISTRIBUTED======
-
+import torch.nn as nn
 from torch.utils.data import DataLoader
-from glow import WaveGlow, WaveGlowLoss
-from mel2samp import Mel2Samp
+from torch.optim import Adam
+from tqdm import tqdm
 
-def load_checkpoint(checkpoint_path, model, optimizer):
-    assert os.path.isfile(checkpoint_path)
-    checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
-    iteration = checkpoint_dict['iteration']
-    optimizer.load_state_dict(checkpoint_dict['optimizer'])
-    model_for_loading = checkpoint_dict['model']
-    model.load_state_dict(model_for_loading.state_dict())
-    print("Loaded checkpoint '{}' (iteration {})" .format(
-          checkpoint_path, iteration))
-    return model, optimizer, iteration
+from model import WaveGlow
+from mel import MelSpectrogram
+from dataset import AudioMelDataset
 
-def save_checkpoint(model, optimizer, learning_rate, iteration, filepath):
-    print("Saving model and optimizer state at iteration {} to {}".format(
-          iteration, filepath))
-    model_for_saving = WaveGlow(**waveglow_config).cuda()
-    model_for_saving.load_state_dict(model.state_dict())
-    torch.save({'model': model_for_saving,
-                'iteration': iteration,
-                'optimizer': optimizer.state_dict(),
-                'learning_rate': learning_rate}, filepath)
 
-def train(num_gpus, rank, group_name, output_directory, epochs, learning_rate,
-          sigma, iters_per_checkpoint, batch_size, seed, fp16_run,
-          checkpoint_path, with_tensorboard):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    #=====START: ADDED FOR DISTRIBUTED======
-    if num_gpus > 1:
-        init_distributed(rank, num_gpus, group_name, **dist_config)
-    #=====END:   ADDED FOR DISTRIBUTED======
+def load_config(path="config.json"):
+    with open(path, "r") as f:
+        return json.load(f)
 
-    criterion = WaveGlowLoss(sigma)
-    model = WaveGlow(**waveglow_config).cuda()
 
-    #=====START: ADDED FOR DISTRIBUTED======
-    if num_gpus > 1:
-        model = apply_gradient_allreduce(model)
-    #=====END:   ADDED FOR DISTRIBUTED======
+def save_checkpoint(model, optimizer, epoch, step, filepath):
+    print(f"\nSaving checkpoint to: {filepath}")
+    torch.save({
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "epoch": epoch,
+        "step": step
+    }, filepath)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    if fp16_run:
-        from apex import amp
-        model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
+def load_checkpoint(filepath, model, optimizer):
+    print(f"Loading checkpoint: {filepath}")
+    ckpt = torch.load(filepath, map_location="cpu")
+    model.load_state_dict(ckpt["model"])
+    optimizer.load_state_dict(ckpt["optimizer"])
+    return ckpt["epoch"], ckpt["step"]
 
-    # Load checkpoint if one exists
-    iteration = 0
-    if checkpoint_path != "":
-        model, optimizer, iteration = load_checkpoint(checkpoint_path, model,
-                                                      optimizer)
-        iteration += 1  # next iteration is iteration + 1
 
-    trainset = Mel2Samp(**data_config)
-    # =====START: ADDED FOR DISTRIBUTED======
-    train_sampler = DistributedSampler(trainset) if num_gpus > 1 else None
-    # =====END:   ADDED FOR DISTRIBUTED======
-    train_loader = DataLoader(trainset, num_workers=1, shuffle=False,
-                              sampler=train_sampler,
-                              batch_size=batch_size,
-                              pin_memory=False,
-                              drop_last=True)
+def main():
+    config = load_config("config.json")
+    train_cfg = config["train_config"]
+    data_cfg = config["data_config"]
+    wg_cfg = config["waveglow_config"]
 
-    # Get shared output_directory ready
-    if rank == 0:
-        if not os.path.isdir(output_directory):
-            os.makedirs(output_directory)
-            os.chmod(output_directory, 0o775)
-        print("output directory", output_directory)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    if with_tensorboard and rank == 0:
-        from tensorboardX import SummaryWriter
-        logger = SummaryWriter(os.path.join(output_directory, 'logs'))
+    # -------------------------------
+    # 1. MEL TRANSFORM
+    # -------------------------------
+    mel_transform = MelSpectrogram(
+        sampling_rate=data_cfg["sampling_rate"],
+        n_mel_channels=wg_cfg["n_mel_channels"],
+        filter_length=data_cfg["filter_length"],
+        hop_length=data_cfg["hop_length"],
+        win_length=data_cfg["win_length"],
+        mel_fmin=data_cfg["mel_fmin"],
+        mel_fmax=data_cfg["mel_fmax"]
+    ).to(device)
 
-    model.train()
-    epoch_offset = max(0, int(iteration / len(train_loader)))
-    # ================ MAIN TRAINNIG LOOP! ===================
-    for epoch in range(epoch_offset, epochs):
-        print("Epoch: {}".format(epoch))
-        for i, batch in enumerate(train_loader):
-            model.zero_grad()
+    # -------------------------------
+    # 2. DATASET
+    # -------------------------------
+    dataset = AudioMelDataset(
+        filelist=data_cfg["training_files"],
+        segment_length=data_cfg["segment_length"],
+        sampling_rate=data_cfg["sampling_rate"],
+        mel_transform=mel_transform
+    )
 
-            mel, audio = batch
-            mel = torch.autograd.Variable(mel.cuda())
-            audio = torch.autograd.Variable(audio.cuda())
-            outputs = model((mel, audio))
+    dataloader = DataLoader(
+        dataset,
+        batch_size=train_cfg["batch_size"],
+        shuffle=True,
+        num_workers=2,
+        drop_last=True
+    )
 
-            loss = criterion(outputs)
-            if num_gpus > 1:
-                reduced_loss = reduce_tensor(loss.data, num_gpus).item()
+    # -------------------------------
+    # 3. MODEL
+    # -------------------------------
+    waveglow = WaveGlow(wg_cfg).to(device)
+    optimizer = Adam(waveglow.parameters(), lr=train_cfg["learning_rate"])
+
+    start_epoch, start_step = 0, 0
+
+    if train_cfg["checkpoint_path"] != "":
+        start_epoch, start_step = load_checkpoint(
+            train_cfg["checkpoint_path"], waveglow, optimizer
+        )
+
+    if train_cfg["fp16_run"]:
+        scaler = torch.cuda.amp.GradScaler()
+
+    # -------------------------------
+    # 4. TRAIN LOOP
+    # -------------------------------
+    waveglow.train()
+
+    total_steps = start_step
+
+    for epoch in range(start_epoch, train_cfg["epochs"]):
+        loop = tqdm(dataloader, desc=f"Epoch {epoch}")
+
+        for mel, audio in loop:
+            mel = mel.to(device)
+            audio = audio.to(device)
+
+            optimizer.zero_grad()
+
+            # FP16
+            if train_cfg["fp16_run"]:
+                with torch.cuda.amp.autocast():
+                    loss = waveglow.loss(mel, audio)
+
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                scaler.step(optimizer)
+                scaler.update()
+
             else:
-                reduced_loss = loss.item()
-
-            if fp16_run:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
+                loss = waveglow.loss(mel, audio)
                 loss.backward()
+                optimizer.step()
 
-            optimizer.step()
+            total_steps += 1
+            loop.set_postfix(loss=float(loss))
 
-            print("{}:\t{:.9f}".format(iteration, reduced_loss))
-            if with_tensorboard and rank == 0:
-                logger.add_scalar('training_loss', reduced_loss, i + len(train_loader) * epoch)
+            # SAVE CKPT
+            if total_steps % train_cfg["iters_per_checkpoint"] == 0:
+                ckpt_path = os.path.join(
+                    train_cfg["output_directory"], f"waveglow_{total_steps}.pt"
+                )
+                save_checkpoint(waveglow, optimizer, epoch, total_steps, ckpt_path)
 
-            if (iteration % iters_per_checkpoint == 0):
-                if rank == 0:
-                    checkpoint_path = "{}/waveglow_{}".format(
-                        output_directory, iteration)
-                    save_checkpoint(model, optimizer, learning_rate, iteration,
-                                    checkpoint_path)
+        # SAVE END OF EPOCH
+        ckpt_end = os.path.join(
+            train_cfg["output_directory"], f"waveglow_epoch_{epoch}.pt"
+        )
+        save_checkpoint(waveglow, optimizer, epoch, total_steps, ckpt_end)
 
-            iteration += 1
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', type=str,
-                        help='JSON file for configuration')
-    parser.add_argument('-r', '--rank', type=int, default=0,
-                        help='rank of process for distributed')
-    parser.add_argument('-g', '--group_name', type=str, default='',
-                        help='name of group for distributed')
-    args = parser.parse_args()
-
-    # Parse configs.  Globals nicer in this case
-    with open(args.config) as f:
-        data = f.read()
-    config = json.loads(data)
-    train_config = config["train_config"]
-    global data_config
-    data_config = config["data_config"]
-    global dist_config
-    dist_config = config["dist_config"]
-    global waveglow_config
-    waveglow_config = config["waveglow_config"]
-
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1:
-        if args.group_name == '':
-            print("WARNING: Multiple GPUs detected but no distributed group set")
-            print("Only running 1 GPU.  Use distributed.py for multiple GPUs")
-            num_gpus = 1
-
-    if num_gpus == 1 and args.rank != 0:
-        raise Exception("Doing single GPU training on rank > 0")
-
-    torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = False
-    train(num_gpus, args.rank, args.group_name, **train_config)
+    main()

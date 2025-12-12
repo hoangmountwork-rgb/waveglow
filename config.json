@@ -2,28 +2,24 @@
     "train_config": {
         "fp16_run": true,
         "output_directory": "checkpoints",
-        "epochs": 100000,
+        "epochs": 20000,                
         "learning_rate": 1e-4,
         "sigma": 1.0,
-        "iters_per_checkpoint": 2000,
-        "batch_size": 12,
+        "iters_per_checkpoint": 1000,
+        "batch_size": 4,               
         "seed": 1234,
-        "checkpoint_path": "",
-        "with_tensorboard": false
+        "checkpoint_path": ""    
     },
+
     "data_config": {
         "training_files": "train_files.txt",
-        "segment_length": 16000,
+        "segment_length": 66000,      
         "sampling_rate": 22050,
         "filter_length": 1024,
         "hop_length": 256,
         "win_length": 1024,
         "mel_fmin": 0.0,
-        "mel_fmax": 8000.0
-    },
-    "dist_config": {
-        "dist_backend": "nccl",
-        "dist_url": "tcp://localhost:54321"
+        "mel_fmax": 11025.0
     },
 
     "waveglow_config": {
@@ -33,8 +29,8 @@
         "n_early_every": 4,
         "n_early_size": 2,
         "WN_config": {
-            "n_layers": 8,
-            "n_channels": 256,
+            "n_layers": 6,
+            "n_channels": 128,
             "kernel_size": 3
         }
     }

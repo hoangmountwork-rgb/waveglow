@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Audio / large / generated
+*.wav
+*.mp3
+*.npy
+*.npz
+*.pt
+*.pth
+
+# Project folders to ignore
+audio/
+mel/
+generated_audio/
+generated_wav/
+checkpoints/
+vivos/
+logs/
+
+# Misc
+mel_list.txt
+train_files.txt
+generated_long.wav
