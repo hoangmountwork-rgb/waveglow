@@ -1,91 +1,70 @@
-![WaveGlow](waveglow_logo.png "WaveGLow")
+WaveGlow Vietnamese TTS
+Repository này chứa hệ thống Text-to-Speech (TTS) bằng WaveGlow cho tiếng Việt. Cho phép bạn train model của riêng mình hoặc tạo audio từ checkpoint đã có sẵn.
+Cấu trúc project
 
-## WaveGlow: a Flow-based Generative Network for Speech Synthesis
+waveglow/
+├── checkpoints/          # Checkpoint model (pretrained hoặc của bạn)
+├── mel/                  # Mel spectrogram cho inference
+├── train_files.txt       # Danh sách file .wav để train
+├── config.json           # Cấu hình train & model
+├── glow.py               # Implementation của WaveGlow
+├── meltowav.py           # Script inference đơn giản
+├── inference.py          # Script inference theo chuẩn NVIDIA
+└── README.md
 
-### Ryan Prenger, Rafael Valle, and Bryan Catanzaro
+Yêu cầu
 
-In our recent [paper], we propose WaveGlow: a flow-based network capable of
-generating high quality speech from mel-spectrograms. WaveGlow combines insights
-from [Glow] and [WaveNet] in order to provide fast, efficient and high-quality
-audio synthesis, without the need for auto-regression. WaveGlow is implemented
-using only a single network, trained using only a single cost function:
-maximizing the likelihood of the training data, which makes the training
-procedure simple and stable.
+- Python 3.8+
+- PyTorch 2.x (GPU + CUDA nếu có)
+- numpy, soundfile, scipy
 
-Our [PyTorch] implementation produces audio samples at a rate of 1200 
-kHz on an NVIDIA V100 GPU. Mean Opinion Scores show that it delivers audio
-quality as good as the best publicly available WaveNet implementation.
+Cài đặt thư viện:
+pip install torch numpy soundfile scipy
+Tùy chọn: sử dụng conda environment:
 
-Visit our [website] for audio samples.
+conda create -n waveglow_tts python=3.8
+conda activate waveglow_tts
+pip install torch numpy soundfile scipy
 
-## Setup
+Huấn luyện (Training)
+Chuẩn bị dữ liệu:
 
-1. Clone our repo and initialize submodule
+- Sắp xếp các file .wav vào một thư mục.
+- Tạo train_files.txt chứa đường dẫn tất cả các file .wav.
+- Cấu hình các tham số trong config.json:
+{
+  "segment_length": 66000,
+  "sampling_rate": 22050,
+  "batch_size": 4,
+  "epochs": 30000
+}
+- segment_length: kích thước đoạn audio, càng lớn → context tốt hơn nhưng GPU sẽ nặng hơn.
 
-   ```command
-   git clone https://github.com/NVIDIA/waveglow.git
-   cd waveglow
-   git submodule init
-   git submodule update
-   ```
+Bắt đầu huấn luyện:
+python train.py --config config.json
 
-2. Install requirements `pip3 install -r requirements.txt`
+Lưu ý:
+- Với laptop Intel 11500H + RTX 3050 4GB:
+  - Batch size = 4 là ổn.
+  - FP16 giúp giảm bộ nhớ GPU.
+- Loss có thể không giảm nhanh trong vài trăm bước đầu.
 
-3. Install [Apex]
+Inference (Tạo audio)
+Sử dụng Mel Spectrogram:
+python meltowav.py
+Sử dụng script NVIDIA-style:
+python inference.py -f mel_list.txt -w checkpoints/waveglow_256channels.pt -o generated_wav -s 1.0 --is_fp16
+Mẹo & Lưu ý
 
+- Test ban đầu với segment length nhỏ và batch size nhỏ để tránh out-of-memory.
+- Sử dụng checkpoint từng bước (iters_per_checkpoint) để lưu tiến trình training.
+- Normalize audio sau khi infer để tránh clipping:
+  audio = 0.99 * audio / np.max(np.abs(audio))
+- Nếu gặp lỗi weightnorm, hãy loại bỏ hoặc dùng checkpoint tương thích.
 
-## Generate audio with our pre-existing model
-
-1. Download our [published model]
-2. Download [mel-spectrograms]
-3. Generate audio `python3 inference.py -f <(ls mel_spectrograms/*.pt) -w waveglow_256channels.pt -o . --is_fp16 -s 0.6`  
-
-N.b. use `convert_model.py` to convert your older models to the current model
-with fused residual and skip connections.
-
-## Train your own model
-
-1. Download [LJ Speech Data]. In this example it's in `data/`
-
-2. Make a list of the file names to use for training/testing
-
-   ```command
-   ls data/*.wav | tail -n+10 > train_files.txt
-   ls data/*.wav | head -n10 > test_files.txt
-   ```
-
-3. Train your WaveGlow networks
-
-   ```command
-   mkdir checkpoints
-   python train.py -c config.json
-   ```
-
-   For multi-GPU training replace `train.py` with `distributed.py`.  Only tested with single node and NCCL.
-
-   For mixed precision training set `"fp16_run": true` on `config.json`.
-
-4. Make test set mel-spectrograms
-
-   `python mel2samp.py -f test_files.txt -o . -c config.json`
-
-5. Do inference with your network
-
-   ```command
-   ls *.pt > mel_files.txt
-   python3 inference.py -f mel_files.txt -w checkpoints/waveglow_10000 -o . --is_fp16 -s 0.6
-   ```
-
-[//]: # (TODO)
-[//]: # (PROVIDE INSTRUCTIONS FOR DOWNLOADING LJS)
-[pytorch 1.0]: https://github.com/pytorch/pytorch#installation
-[website]: https://nv-adlr.github.io/WaveGlow
-[paper]: https://arxiv.org/abs/1811.00002
-[WaveNet implementation]: https://github.com/r9y9/wavenet_vocoder
-[Glow]: https://blog.openai.com/glow/
-[WaveNet]: https://deepmind.com/blog/wavenet-generative-model-raw-audio/
-[PyTorch]: http://pytorch.org
-[published model]: https://drive.google.com/open?id=1rpK8CzAAirq9sWZhe9nlfvxMF1dRgFbF
-[mel-spectrograms]: https://drive.google.com/file/d/1g_VXK2lpP9J25dQFhQwx7doWl_p20fXA/view?usp=sharing
-[LJ Speech Data]: https://keithito.com/LJ-Speech-Dataset
-[Apex]: https://github.com/nvidia/apex
+Tài liệu tham khảo
+- NVIDIA WaveGlow: https://github.com/NVIDIA/waveglow
+- Dữ liệu TTS tiếng Việt: https://www.kaggle.com/datasets/kynthesis/vivos-vietnamese-speech-corpus-for-asr
+License
+Project này dành cho nghiên cứu và sử dụng cá nhân.
+Sử dụng thương mại cần tuân thủ license của NVIDIA WaveGlow.
