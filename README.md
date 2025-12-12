@@ -5,6 +5,7 @@ Cấu trúc project
 waveglow/
 ├── checkpoints/          # Checkpoint model (pretrained hoặc của bạn)
 ├── mel/                  # Mel spectrogram cho inference
+├── vivos/                # thư mục chứa các file wav
 ├── train_files.txt       # Danh sách file .wav để train
 ├── config.json            # Cấu hình train & model
 ├── glow.py               # Implementation của WaveGlow
@@ -27,7 +28,7 @@ pip install torch numpy soundfile scipy
 
 Huấn luyện (Training)
 Chuẩn bị dữ liệu:
-- link checkpoints https://drive.google.com/drive/folders/1C2BXouxKQh5ishqY0ms1HEDnu-Ta2Rd2?dmr=1&ec=wgc-drive-hero-goto (giải nén vào thư mục checkpoints)
+- link checkpoints và data vivos https://drive.google.com/drive/folders/1C2BXouxKQh5ishqY0ms1HEDnu-Ta2Rd2?dmr=1&ec=wgc-drive-hero-goto (giải nén vào thư mục checkpoints)
 - Sắp xếp các file .wav vào một thư mục.
 - Tạo train_files.txt chứa đường dẫn tất cả các file .wav.
 - Cấu hình các tham số trong config.json:
