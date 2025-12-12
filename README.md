@@ -6,14 +6,15 @@ waveglow/
 ├── checkpoints/          # Checkpoint model (pretrained hoặc của bạn)
 ├── mel/                  # Mel spectrogram cho inference
 ├── train_files.txt       # Danh sách file .wav để train
-├── config.json           # Cấu hình train & model
+├── config.json            # Cấu hình train & model
 ├── glow.py               # Implementation của WaveGlow
 ├── meltowav.py           # Script inference đơn giản
 ├── inference.py          # Script inference theo chuẩn NVIDIA
 └── README.md
 
-Yêu cầu
+link checkpoints https://drive.google.com/drive/folders/1C2BXouxKQh5ishqY0ms1HEDnu-Ta2Rd2?dmr=1&ec=wgc-drive-hero-goto
 
+Yêu cầu
 - Python 3.8+
 - PyTorch 2.x (GPU + CUDA nếu có)
 - numpy, soundfile, scipy
@@ -52,8 +53,6 @@ Lưu ý:
 Inference (Tạo audio)
 Sử dụng Mel Spectrogram:
 python meltowav.py
-Sử dụng script NVIDIA-style:
-python inference.py -f mel_list.txt -w checkpoints/waveglow_256channels.pt -o generated_wav -s 1.0 --is_fp16
 Mẹo & Lưu ý
 
 - Test ban đầu với segment length nhỏ và batch size nhỏ để tránh out-of-memory.
